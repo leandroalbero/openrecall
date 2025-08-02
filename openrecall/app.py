@@ -1,13 +1,17 @@
 from threading import Thread
 
-from flask import Flask, render_template_string, request, send_from_directory
+from flask import Flask, render_template_string, request, send_from_directory, send_file
 from jinja2 import BaseLoader
+from io import BytesIO
+import json
+from PIL import Image, ImageDraw
 
 from openrecall.config import appdata_folder, screenshots_path
-from openrecall.database import create_db, get_sorted_entries, get_all_entries
+from openrecall.database import create_db, get_sorted_entries, get_all_entries, get_connection, get_cursor, scheme
 from openrecall.nlp import get_embedding
 from openrecall.screenshot import record_screenshots_thread
 from openrecall.utils import human_readable_time, timestamp_to_human_readable
+import os
 
 app = Flask(__name__)
 
@@ -86,7 +90,7 @@ app.jinja_env.loader = StringLoader()
 @app.route("/")
 def timeline():
     entries = get_all_entries()
-    entries = [{k: v for k, v in e._asdict().items() if k != "embedding"} for e in entries]
+    entries = [{k: v for k, v in e._asdict().items() if k not in ["embedding", "ocr_data"]} for e in entries]
     return render_template_string(
         """
 {% extends "base_template" %}
@@ -138,7 +142,7 @@ def search():
     q = request.args.get("q")
     query_embedding = get_embedding(q)
     sorted_entries = get_sorted_entries(query_embedding, top_k=100)
-    sorted_entries = [{k: v for k, v in e._asdict().items() if k != "embedding"} for e in sorted_entries]
+    sorted_entries = [{k: v for k, v in e._asdict().items() if k not in ["embedding", "ocr_data"]} for e in sorted_entries]
     return render_template_string(
         """
 {% extends "base_template" %}
@@ -149,7 +153,7 @@ def search():
                 <div class="col-md-3 mb-4">
                     <div class="card">
                         <a href="#" data-toggle="modal" data-target="#modal-{{ loop.index0 }}">
-                            <img src="/static/{{ entry.filename }}" alt="Image" class="card-img-top">
+                            <img src="/highlighted/{{ entry.filename }}?q={{ q | urlencode }}" alt="Image" class="card-img-top">
                         </a>
                     </div>
                 </div>
@@ -157,7 +161,7 @@ def search():
                     <div class="modal-dialog modal-xl" role="document" style="max-width: none; width: 100vw; height: 100vh; padding: 20px;">
                         <div class="modal-content" style="height: calc(100vh - 40px); width: calc(100vw - 40px); padding: 0;">
                             <div class="modal-body" style="padding: 0;">
-                                <img src="/static/{{ entry.filename }}" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
+                                <img src="/highlighted/{{ entry.filename }}?q={{ q | urlencode }}" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
                             </div>
                         </div>
                     </div>
@@ -168,12 +172,53 @@ def search():
 {% endblock %}
 """,
         entries=sorted_entries,
+        q=q
     )
 
 
 @app.route("/static/<filename>")
 def serve_image(filename):
     return send_from_directory(screenshots_path, filename)
+
+
+@app.route("/highlighted/<filename>")
+def serve_highlighted(filename):
+    q = request.args.get("q")
+    if not q:
+        return serve_image(filename)
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    if scheme == "sqlite":
+        cursor.execute("SELECT ocr_data FROM entries WHERE filename = ?", (filename,))
+    else:
+        cursor.execute("SELECT ocr_data FROM entries WHERE filename = %s", (filename,))
+    row = cursor.fetchone()
+    ocr_json = row["ocr_data"] if row else None
+    conn.close()
+    if not ocr_json:
+        return serve_image(filename)
+    ocr_data = json.loads(ocr_json)
+    image_path = os.path.join(screenshots_path, filename)
+    if not os.path.exists(image_path):
+        return "Image not found", 404
+    img = Image.open(image_path)
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    query_words = set(w.lower() for w in q.split())
+    for page in ocr_data.get('pages', []):
+        ph, pw = page['dimensions']
+        # Assuming dimensions match, but to be safe
+        for block in page.get('blocks', []):
+            for line in block.get('lines', []):
+                for word in line.get('words', []):
+                    if word['value'].lower() in query_words:
+                        (x1, y1), (x2, y2) = word['geometry']
+                        bbox = (x1 * width, y1 * height, x2 * width, y2 * height)
+                        draw.rectangle(bbox, outline="red", width=3)
+    img_io = BytesIO()
+    img.save(img_io, 'WEBP', lossless=True)
+    img_io.seek(0)
+    return send_file(img_io, mimetype='image/webp')
 
 
 if __name__ == "__main__":

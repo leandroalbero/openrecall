@@ -84,7 +84,7 @@ class TestDatabase(unittest.TestCase):
         """Test inserting a single entry."""
         ts = int(time.time())
         embedding = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        inserted_id = insert_entry("Test text", ts, embedding, "TestApp", "TestTitle", "TestFilename")
+        inserted_id = insert_entry("Test text", ts, embedding, "TestApp", "TestTitle", "TestFilename", "")
 
         self.assertIsNotNone(inserted_id)
         self.assertIsInstance(inserted_id, int)
@@ -109,11 +109,11 @@ class TestDatabase(unittest.TestCase):
         embedding1 = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         embedding2 = np.array([0.4, 0.5, 0.6], dtype=np.float32)
 
-        id1 = insert_entry("First text", ts, embedding1, "App1", "Title1", "TestFilename")
+        id1 = insert_entry("First text", ts, embedding1, "App1", "Title1", "TestFilename", "")
         self.assertIsNotNone(id1)
 
         # Try inserting another entry with the same timestamp
-        id2 = insert_entry("Second text", ts, embedding2, "App2", "Title2", "TestFilename")
+        id2 = insert_entry("Second text", ts, embedding2, "App2", "Title2", "TestFilename", "")
         self.assertIsNone(id2, "Inserting duplicate timestamp should return None")
 
         # Verify only the first entry exists
@@ -140,9 +140,9 @@ class TestDatabase(unittest.TestCase):
         emb2 = np.array([0.2] * 5, dtype=np.float32)
         emb3 = np.array([0.3] * 5, dtype=np.float32)
 
-        insert_entry("Text 1", ts1, emb1, "App1", "Title1", "File1")
-        insert_entry("Text 2", ts2, emb2, "App2", "Title2", "File2")
-        insert_entry("Text 3", ts3, emb3, "App3", "Title3", "File3")
+        insert_entry("Text 1", ts1, emb1, "App1", "Title1", "File1", "")
+        insert_entry("Text 2", ts2, emb2, "App2", "Title2", "File2", "")
+        insert_entry("Text 3", ts3, emb3, "App3", "Title3", "File3", "")
 
         entries = get_all_entries()
         self.assertEqual(len(entries), 3)
@@ -175,9 +175,9 @@ class TestDatabase(unittest.TestCase):
         ts3 = ts1 - 10
         emb = np.array([0.1] * 5, dtype=np.float32) # Embedding content doesn't matter here
 
-        insert_entry("T1", ts1, emb, "A1", "T1", "F1")
-        insert_entry("T2", ts2, emb, "A2", "T2", "F2")
-        insert_entry("T3", ts3, emb, "A3", "T3", "F3")
+        insert_entry("T1", ts1, emb, "A1", "T1", "F1", "")
+        insert_entry("T2", ts2, emb, "A2", "T2", "F2", "")
+        insert_entry("T3", ts3, emb, "A3", "T3", "F3", "")
 
         timestamps = get_timestamps()
         self.assertEqual(len(timestamps), 3)

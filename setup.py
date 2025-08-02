@@ -32,7 +32,7 @@ extras_require = {
     "python-doctr": [
         "python-doctr @ git+https://github.com/koenvaneijk/doctr.git@af711bc04eb8876a7189923fb51ec44481ee18cd"
     ],
-    "dev": ["ruff", "mypy", "types-setuptools", "types-psutil", "types-pywin32", "types-psycopg2"],
+    "dev": ["ruff", "mypy", "pytest", "types-setuptools", "types-psutil", "types-pywin32", "types-psycopg2"],
 }
 
 # Determine the current OS

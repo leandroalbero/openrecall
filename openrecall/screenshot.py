@@ -5,6 +5,7 @@ from typing import List
 import mss
 import numpy as np
 from PIL import Image
+import json
 
 from openrecall.config import screenshots_path, args
 from openrecall.database import insert_entry
@@ -149,14 +150,15 @@ def record_screenshots_thread() -> None:
                     format="webp",
                     lossless=True,
                 )
-                text: str = extract_text_from_image(current_screenshot)
+                text, ocr_export = extract_text_from_image(current_screenshot)
                 # Only proceed if OCR actually extracts text
                 if text.strip():
+                    ocr_data = json.dumps(ocr_export)
                     embedding: np.ndarray = get_embedding(text)
                     active_app_name: str = get_active_app_name() or "Unknown App"
                     active_window_title: str = get_active_window_title() or "Unknown Title"
                     insert_entry(
-                        text, timestamp, embedding, active_app_name, active_window_title, filename
+                        text, timestamp, embedding, active_app_name, active_window_title, filename, ocr_data
                     )
 
         time.sleep(3) # Wait before taking the next screenshot

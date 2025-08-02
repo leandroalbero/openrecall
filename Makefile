@@ -13,3 +13,11 @@ docker-stop:
 lint:
 	ruff check . --fix
 	mypy . 
+
+docker-delete:
+	docker stop $(DB_CONTAINER) || true
+	docker rm $(DB_CONTAINER) || true
+	docker rmi $(DB_IMAGE) || true
+
+test:
+	pytest tests/ 
