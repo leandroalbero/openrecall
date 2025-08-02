@@ -18,6 +18,9 @@ install_requires = [
     "h5py==3.11.0",
     "rapidfuzz==3.9.3",
     "Pillow==10.3.0",
+    "psycopg2-binary==2.9.10",
+    "pgvector==0.4.1",
+    "psutil==7.0.0",
 ]
 
 # Define OS-specific dependencies
@@ -25,6 +28,7 @@ extras_require = {
     "windows": ["pywin32", "psutil"],
     "macos": ["pyobjc==10.3"],
     "linux": [],
+    "postgres": ["psycopg2-binary", "pgvector"],
     "python-doctr": [
         "python-doctr @ git+https://github.com/koenvaneijk/doctr.git@af711bc04eb8876a7189923fb51ec44481ee18cd"
     ],

@@ -127,3 +127,16 @@ mail@datatalk.be
 
 OpenRecall is released under the [AGPLv3](https://opensource.org/licenses/AGPL-3.0), ensuring that it remains open and accessible to everyone.
 
+## Running Database in Docker
+
+To run PostgreSQL with pgvector in Docker:
+
+1. Build the image: `make docker-build`
+2. Start the container: `make docker-start`
+3. Run the app with: `python -m openrecall.app --db-url postgresql://postgres:mysecretpassword@localhost:5432/openrecall`
+4. To stop: `make docker-stop`
+
+Note: Adjust password and other params in Makefile as needed.
+
+Before running make commands, copy .env.sample to .env and edit the credentials as needed.
+

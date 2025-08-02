@@ -17,6 +17,12 @@ parser.add_argument(
     default=False,
 )
 
+parser.add_argument(
+    "--db-url",
+    default=None,
+    help="Database URL (e.g., sqlite:///path/to/db or postgresql://user:pass@host:port/dbname)",
+)
+
 args, _ = parser.parse_known_args()
 
 
@@ -51,3 +57,5 @@ if not os.path.exists(screenshots_path):
         os.makedirs(screenshots_path)
     except:
         pass
+
+db_url = args.db_url if args.db_url else f"sqlite:///{db_path}"

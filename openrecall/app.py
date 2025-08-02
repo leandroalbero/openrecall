@@ -5,7 +5,7 @@ from flask import Flask, render_template_string, request, send_from_directory
 from jinja2 import BaseLoader
 
 from openrecall.config import appdata_folder, screenshots_path
-from openrecall.database import create_db, get_all_entries, get_timestamps
+from openrecall.database import create_db, get_all_entries, get_timestamps, get_sorted_entries
 from openrecall.nlp import cosine_similarity, get_embedding
 from openrecall.screenshot import record_screenshots_thread
 from openrecall.utils import human_readable_time, timestamp_to_human_readable
@@ -136,13 +136,8 @@ def timeline():
 @app.route("/search")
 def search():
     q = request.args.get("q")
-    entries = get_all_entries()
-    embeddings = [entry.embedding for entry in entries]    
     query_embedding = get_embedding(q)
-    similarities = [cosine_similarity(query_embedding, emb) for emb in embeddings]
-    indices = np.argsort(similarities)[::-1]
-    sorted_entries = [entries[i] for i in indices]
-
+    sorted_entries = get_sorted_entries(query_embedding, top_k=100)
     return render_template_string(
         """
 {% extends "base_template" %}
@@ -153,7 +148,7 @@ def search():
                 <div class="col-md-3 mb-4">
                     <div class="card">
                         <a href="#" data-toggle="modal" data-target="#modal-{{ loop.index0 }}">
-                            <img src="/static/{{ entry['timestamp'] }}.webp" alt="Image" class="card-img-top">
+                            <img src="/static/{{ entry.timestamp }}.webp" alt="Image" class="card-img-top">
                         </a>
                     </div>
                 </div>
@@ -161,7 +156,7 @@ def search():
                     <div class="modal-dialog modal-xl" role="document" style="max-width: none; width: 100vw; height: 100vh; padding: 20px;">
                         <div class="modal-content" style="height: calc(100vh - 40px); width: calc(100vw - 40px); padding: 0;">
                             <div class="modal-body" style="padding: 0;">
-                                <img src="/static/{{ entry['timestamp'] }}.webp" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
+                                <img src="/static/{{ entry.timestamp }}.webp" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
                             </div>
                         </div>
                     </div>

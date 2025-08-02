@@ -1,133 +1,186 @@
+import os
 import sqlite3
 from collections import namedtuple
 import numpy as np
 from typing import Any, List, Optional, Tuple
+from urllib.parse import urlparse
 
-from openrecall.config import db_path
+from openrecall.config import db_url
+from openrecall.nlp import cosine_similarity
 
 # Define the structure of a database entry using namedtuple
 Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding"])
 
+def get_conn_params():
+    parsed = urlparse(db_url)
+    scheme = parsed.scheme
+    if scheme == "sqlite":
+        return {"scheme": "sqlite", "path": parsed.path}
+    elif scheme == "postgresql":
+        return {
+            "scheme": "postgresql",
+            "user": parsed.username,
+            "password": parsed.password,
+            "host": parsed.hostname,
+            "port": parsed.port or 5432,
+            "dbname": parsed.path.lstrip("/"),
+        }
+    else:
+        raise ValueError(f"Unsupported database scheme: {scheme}")
+
+params = get_conn_params()
+scheme = params["scheme"]
+
+if scheme == "sqlite":
+    import sqlite3
+
+    db_path = params["path"]
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+    def get_connection():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def serialize_embedding(embedding: np.ndarray):
+        return embedding.astype(np.float32).tobytes()
+
+    def deserialize_embedding(data):
+        return np.frombuffer(data, dtype=np.float32)
+
+    embedding_sql_type = "BLOB"
+elif scheme == "postgresql":
+    try:
+        import psycopg2
+        import psycopg2.extras
+        from pgvector.psycopg2 import register_vector
+    except ImportError as e:
+        raise ImportError(
+            "PostgreSQL support requires 'psycopg2-binary' and 'pgvector'. Install with 'pip install psycopg2-binary pgvector'"
+        ) from e
+
+    def init_connection():
+        return psycopg2.connect(
+            dbname=params["dbname"],
+            user=params["user"],
+            password=params["password"],
+            host=params["host"],
+            port=params["port"],
+        )
+
+    def get_connection():
+        conn = init_connection()
+        register_vector(conn)
+        return conn
+
+    def serialize_embedding(embedding: np.ndarray):
+        return embedding
+
+    def deserialize_embedding(data):
+        return data
+
+    embedding_sql_type = "vector(384)"
+
+    def get_cursor(conn):
+        return conn.cursor() if scheme == "sqlite" else conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+param_placeholder = "?" if scheme == "sqlite" else "%s"
 
 def create_db() -> None:
-    """
-    Creates the SQLite database and the 'entries' table if they don't exist.
-
-    The table schema includes columns for an auto-incrementing ID, application name,
-    window title, extracted text, timestamp, and text embedding.
-    """
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """CREATE TABLE IF NOT EXISTS entries (
-                       id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       app TEXT,
-                       title TEXT,
-                       text TEXT,
-                       timestamp INTEGER UNIQUE,
-                       embedding BLOB
-                   )"""
-            )
-            # Add index on timestamp for faster lookups
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_timestamp ON entries (timestamp)"
-            )
-            conn.commit()
-    except sqlite3.Error as e:
-        print(f"Database error during table creation: {e}")
-
+    conn = init_connection() if scheme == "postgresql" else get_connection()
+    cursor = conn.cursor() if scheme == "sqlite" else get_cursor(conn)
+    if scheme == "postgresql":
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    id_type = "INTEGER PRIMARY KEY AUTOINCREMENT" if scheme == "sqlite" else "SERIAL PRIMARY KEY"
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS entries (
+            id {id_type},
+            app TEXT,
+            title TEXT,
+            text TEXT,
+            timestamp INTEGER UNIQUE,
+            embedding {embedding_sql_type}
+        )
+        """
+    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON entries (timestamp)")
+    conn.commit()
+    conn.close()
 
 def get_all_entries() -> List[Entry]:
-    """
-    Retrieves all entries from the database.
-
-    Returns:
-        List[Entry]: A list of all entries as Entry namedtuples.
-                     Returns an empty list if the table is empty or an error occurs.
-    """
-    entries: List[Entry] = []
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row  # Return rows as dictionary-like objects
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY timestamp DESC")
-            results = cursor.fetchall()
-            for row in results:
-                # Deserialize the embedding blob back into a NumPy array
-                embedding = np.frombuffer(row["embedding"], dtype=np.float32) # Assuming float32, adjust if needed
-                entries.append(
-                    Entry(
-                        id=row["id"],
-                        app=row["app"],
-                        title=row["title"],
-                        text=row["text"],
-                        timestamp=row["timestamp"],
-                        embedding=embedding,
-                    )
-                )
-    except sqlite3.Error as e:
-        print(f"Database error while fetching all entries: {e}")
+    conn = get_connection()
+    cursor = conn.cursor() if scheme == "sqlite" else get_cursor(conn)
+    cursor.execute("SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY timestamp DESC")
+    results = cursor.fetchall()
+    entries = []
+    for row in results:
+        embedding = deserialize_embedding(row["embedding"])
+        entries.append(
+            Entry(
+                id=row["id"],
+                app=row["app"],
+                title=row["title"],
+                text=row["text"],
+                timestamp=row["timestamp"],
+                embedding=embedding,
+            )
+        )
+    conn.close()
     return entries
 
-
 def get_timestamps() -> List[int]:
-    """
-    Retrieves all timestamps from the database, ordered descending.
-
-    Returns:
-        List[int]: A list of all timestamps.
-                   Returns an empty list if the table is empty or an error occurs.
-    """
-    timestamps: List[int] = []
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            # Use the index for potentially faster retrieval
-            cursor.execute("SELECT timestamp FROM entries ORDER BY timestamp DESC")
-            results = cursor.fetchall()
-            timestamps = [result[0] for result in results]
-    except sqlite3.Error as e:
-        print(f"Database error while fetching timestamps: {e}")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT timestamp FROM entries ORDER BY timestamp DESC")
+    timestamps = [row[0] for row in cursor.fetchall()]
+    conn.close()
     return timestamps
-
 
 def insert_entry(
     text: str, timestamp: int, embedding: np.ndarray, app: str, title: str
 ) -> Optional[int]:
-    """
-    Inserts a new entry into the database.
+    serialized = serialize_embedding(embedding)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""INSERT INTO entries (text, timestamp, embedding, app, title)
+        VALUES ({param_placeholder}, {param_placeholder}, {param_placeholder}, {param_placeholder}, {param_placeholder})
+        ON CONFLICT(timestamp) DO NOTHING""",
+        (text, timestamp, serialized, app, title),
+    )
+    last_id = cursor.lastrowid if cursor.rowcount > 0 else None
+    conn.commit()
+    conn.close()
+    return last_id
 
-    Args:
-        text (str): The extracted text content.
-        timestamp (int): The Unix timestamp of the screenshot.
-        embedding (np.ndarray): The embedding vector for the text.
-        app (str): The name of the active application.
-        title (str): The title of the active window.
-
-    Returns:
-        Optional[int]: The ID of the newly inserted row, or None if insertion fails.
-                       Prints an error message to stderr on failure.
-    """
-    embedding_bytes: bytes = embedding.astype(np.float32).tobytes() # Ensure consistent dtype
-    last_row_id: Optional[int] = None
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """INSERT INTO entries (text, timestamp, embedding, app, title)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(timestamp) DO NOTHING""", # Avoid duplicates based on timestamp
-                (text, timestamp, embedding_bytes, app, title),
+def get_sorted_entries(query_embedding: np.ndarray, top_k: int = 100) -> List[Entry]:
+    if scheme == "sqlite":
+        entries = get_all_entries()
+        if not entries:
+            return []
+        similarities = [cosine_similarity(query_embedding, e.embedding) for e in entries]
+        indices = np.argsort(similarities)[::-1][:top_k]
+        return [entries[i] for i in indices]
+    elif scheme == "postgresql":
+        serialized_query = serialize_embedding(query_embedding)
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute(
+            f"SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY embedding <=> {param_placeholder} LIMIT {param_placeholder}",
+            (serialized_query, top_k),
+        )
+        results = cursor.fetchall()
+        entries = [
+            Entry(
+                id=row["id"],
+                app=row["app"],
+                title=row["title"],
+                text=row["text"],
+                timestamp=row["timestamp"],
+                embedding=deserialize_embedding(row["embedding"]),
             )
-            conn.commit()
-            if cursor.rowcount > 0: # Check if insert actually happened
-                last_row_id = cursor.lastrowid
-            # else:
-                # Optionally log that a duplicate timestamp was encountered
-                # print(f"Skipped inserting entry with duplicate timestamp: {timestamp}")
-
-    except sqlite3.Error as e:
-        # More specific error handling can be added (e.g., IntegrityError for UNIQUE constraint)
-        print(f"Database error during insertion: {e}")
-    return last_row_id
+            for row in results
+        ]
+        conn.close()
+        return entries

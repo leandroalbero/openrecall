@@ -8,3 +8,4 @@ build
 .vscode
 .aider*
 .venv
+.env
