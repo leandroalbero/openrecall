@@ -1,8 +1,4 @@
 -include .env
-export
-DB_IMAGE = openrecall-db
-DB_CONTAINER = openrecall-db
-DB_PORT = 5432
 
 docker-build:
 	docker build -t $(DB_IMAGE) -f Dockerfile.postgres .
@@ -13,3 +9,7 @@ docker-start:
 docker-stop:
 	docker stop $(DB_CONTAINER)
 	docker rm $(DB_CONTAINER) 
+
+lint:
+	ruff check . --fix
+	mypy . 

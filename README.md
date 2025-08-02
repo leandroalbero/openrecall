@@ -86,6 +86,18 @@ python3 -m openrecall.app
 Open your browser to:
 [http://localhost:8082](http://localhost:8082) to access OpenRecall.
 
+## Development
+
+To install development dependencies (including linting tools):
+```
+python3 -m pip install -e ".[dev]"
+```
+
+To lint the code:
+```
+make lint
+```
+
 ## Arguments
 `--storage-path` (default: user data path for your OS): allows you to specify the path where the screenshots and database should be stored. We recommend [creating an encrypted volume](docs/encryption.md) to store your data.
 

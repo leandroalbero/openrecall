@@ -1,4 +1,4 @@
-from doctr.models import ocr_predictor
+from doctr.models import ocr_predictor # type: ignore
 
 ocr = ocr_predictor(
     pretrained=True,

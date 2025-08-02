@@ -2,14 +2,14 @@ import os
 import sqlite3
 from collections import namedtuple
 import numpy as np
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from openrecall.config import db_url
 from openrecall.nlp import cosine_similarity
 
 # Define the structure of a database entry using namedtuple
-Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding"])
+Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding", "filename"])
 
 def get_conn_params():
     parsed = urlparse(db_url)
@@ -49,6 +49,9 @@ if scheme == "sqlite":
         return np.frombuffer(data, dtype=np.float32)
 
     embedding_sql_type = "BLOB"
+
+    def get_cursor(conn):
+        return conn.cursor()
 elif scheme == "postgresql":
     try:
         import psycopg2
@@ -100,7 +103,8 @@ def create_db() -> None:
             title TEXT,
             text TEXT,
             timestamp INTEGER UNIQUE,
-            embedding {embedding_sql_type}
+            embedding {embedding_sql_type},
+            filename TEXT
         )
         """
     )
@@ -111,7 +115,7 @@ def create_db() -> None:
 def get_all_entries() -> List[Entry]:
     conn = get_connection()
     cursor = conn.cursor() if scheme == "sqlite" else get_cursor(conn)
-    cursor.execute("SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY timestamp DESC")
+    cursor.execute("SELECT id, app, title, text, timestamp, embedding, filename FROM entries ORDER BY timestamp DESC")
     results = cursor.fetchall()
     entries = []
     for row in results:
@@ -124,6 +128,7 @@ def get_all_entries() -> List[Entry]:
                 text=row["text"],
                 timestamp=row["timestamp"],
                 embedding=embedding,
+                filename=row["filename"],
             )
         )
     conn.close()
@@ -138,18 +143,33 @@ def get_timestamps() -> List[int]:
     return timestamps
 
 def insert_entry(
-    text: str, timestamp: int, embedding: np.ndarray, app: str, title: str
+    text: str, timestamp: int, embedding: np.ndarray, app: str, title: str, filename: str
 ) -> Optional[int]:
     serialized = serialize_embedding(embedding)
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        f"""INSERT INTO entries (text, timestamp, embedding, app, title)
-        VALUES ({param_placeholder}, {param_placeholder}, {param_placeholder}, {param_placeholder}, {param_placeholder})
-        ON CONFLICT(timestamp) DO NOTHING""",
-        (text, timestamp, serialized, app, title),
-    )
-    last_id = cursor.lastrowid if cursor.rowcount > 0 else None
+    cursor = get_cursor(conn)
+    if scheme == "sqlite":
+        cursor.execute(
+            """INSERT OR IGNORE INTO entries (text, timestamp, embedding, app, title, filename)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (text, timestamp, serialized, app, title, filename),
+        )
+        if cursor.rowcount > 0:
+            cursor.execute("SELECT id FROM entries WHERE timestamp = ?", (timestamp,))
+            row = cursor.fetchone()
+            last_id = row["id"]
+        else:
+            last_id = None
+    elif scheme == "postgresql":
+        cursor.execute(
+            """INSERT INTO entries (text, timestamp, embedding, app, title, filename)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (timestamp) DO NOTHING
+            RETURNING id""",
+            (text, timestamp, serialized, app, title, filename),
+        )
+        row = cursor.fetchone()
+        last_id = row["id"] if row else None
     conn.commit()
     conn.close()
     return last_id
@@ -167,7 +187,7 @@ def get_sorted_entries(query_embedding: np.ndarray, top_k: int = 100) -> List[En
         conn = get_connection()
         cursor = get_cursor(conn)
         cursor.execute(
-            f"SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY embedding <=> {param_placeholder} LIMIT {param_placeholder}",
+            f"SELECT id, app, title, text, timestamp, embedding, filename FROM entries ORDER BY embedding <=> {param_placeholder} LIMIT {param_placeholder}",
             (serialized_query, top_k),
         )
         results = cursor.fetchall()
@@ -179,8 +199,11 @@ def get_sorted_entries(query_embedding: np.ndarray, top_k: int = 100) -> List[En
                 text=row["text"],
                 timestamp=row["timestamp"],
                 embedding=deserialize_embedding(row["embedding"]),
+                filename=row["filename"],
             )
             for row in results
         ]
         conn.close()
         return entries
+    else:
+        return []

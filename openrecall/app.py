@@ -1,12 +1,11 @@
 from threading import Thread
 
-import numpy as np
 from flask import Flask, render_template_string, request, send_from_directory
 from jinja2 import BaseLoader
 
 from openrecall.config import appdata_folder, screenshots_path
-from openrecall.database import create_db, get_all_entries, get_timestamps, get_sorted_entries
-from openrecall.nlp import cosine_similarity, get_embedding
+from openrecall.database import create_db, get_sorted_entries, get_all_entries
+from openrecall.nlp import get_embedding
 from openrecall.screenshot import record_screenshots_thread
 from openrecall.utils import human_readable_time, timestamp_to_human_readable
 
@@ -86,39 +85,40 @@ app.jinja_env.loader = StringLoader()
 
 @app.route("/")
 def timeline():
-    # connect to db
-    timestamps = get_timestamps()
+    entries = get_all_entries()
+    entries = [{k: v for k, v in e._asdict().items() if k != "embedding"} for e in entries]
     return render_template_string(
         """
 {% extends "base_template" %}
 {% block content %}
-{% if timestamps|length > 0 %}
+{% if entries|length > 0 %}
   <div class="container">
     <div class="slider-container">
-      <input type="range" class="slider custom-range" id="discreteSlider" min="0" max="{{timestamps|length - 1}}" step="1" value="{{timestamps|length - 1}}">
-      <div class="slider-value" id="sliderValue">{{timestamps[0] | timestamp_to_human_readable }}</div>
+      <input type="range" class="slider custom-range" id="discreteSlider" min="0" max="{{entries|length - 1}}" step="1" value="{{entries|length - 1}}">
+      <div class="slider-value" id="sliderValue">{{entries[0].timestamp | timestamp_to_human_readable }}</div>
     </div>
     <div class="image-container">
-      <img id="timestampImage" src="/static/{{timestamps[0]}}.webp" alt="Image for timestamp">
+      <img id="timestampImage" src="/static/{{entries[0].filename}}" alt="Image for timestamp">
     </div>
   </div>
   <script>
-    const timestamps = {{ timestamps|tojson }};
+    const entries = {{ entries | tojson }};
     const slider = document.getElementById('discreteSlider');
     const sliderValue = document.getElementById('sliderValue');
     const timestampImage = document.getElementById('timestampImage');
 
     slider.addEventListener('input', function() {
-      const reversedIndex = timestamps.length - 1 - slider.value;
-      const timestamp = timestamps[reversedIndex];
-      sliderValue.textContent = new Date(timestamp * 1000).toLocaleString();  // Convert to human-readable format
-      timestampImage.src = `/static/${timestamp}.webp`;
+      const reversedIndex = entries.length - 1 - slider.value;
+      const entry = entries[reversedIndex];
+      sliderValue.textContent = new Date(entry.timestamp * 1000).toLocaleString();
+      timestampImage.src = `/static/${entry.filename}`;
     });
 
-    // Initialize the slider with a default value
-    slider.value = timestamps.length - 1;
-    sliderValue.textContent = new Date(timestamps[0] * 1000).toLocaleString();  // Convert to human-readable format
-    timestampImage.src = `/static/${timestamps[0]}.webp`;
+    // Initialize
+    slider.value = entries.length - 1;
+    const initialEntry = entries[0];
+    sliderValue.textContent = new Date(initialEntry.timestamp * 1000).toLocaleString();
+    timestampImage.src = `/static/${initialEntry.filename}`;
   </script>
 {% else %}
   <div class="container">
@@ -129,7 +129,7 @@ def timeline():
 {% endif %}
 {% endblock %}
 """,
-        timestamps=timestamps,
+        entries=entries,
     )
 
 
@@ -138,6 +138,7 @@ def search():
     q = request.args.get("q")
     query_embedding = get_embedding(q)
     sorted_entries = get_sorted_entries(query_embedding, top_k=100)
+    sorted_entries = [{k: v for k, v in e._asdict().items() if k != "embedding"} for e in sorted_entries]
     return render_template_string(
         """
 {% extends "base_template" %}
@@ -148,7 +149,7 @@ def search():
                 <div class="col-md-3 mb-4">
                     <div class="card">
                         <a href="#" data-toggle="modal" data-target="#modal-{{ loop.index0 }}">
-                            <img src="/static/{{ entry.timestamp }}.webp" alt="Image" class="card-img-top">
+                            <img src="/static/{{ entry.filename }}" alt="Image" class="card-img-top">
                         </a>
                     </div>
                 </div>
@@ -156,7 +157,7 @@ def search():
                     <div class="modal-dialog modal-xl" role="document" style="max-width: none; width: 100vw; height: 100vh; padding: 20px;">
                         <div class="modal-content" style="height: calc(100vh - 40px); width: calc(100vw - 40px); padding: 0;">
                             <div class="modal-body" style="padding: 0;">
-                                <img src="/static/{{ entry.timestamp }}.webp" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
+                                <img src="/static/{{ entry.filename }}" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
                             </div>
                         </div>
                     </div>

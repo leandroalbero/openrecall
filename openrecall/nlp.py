@@ -16,7 +16,7 @@ try:
     logger.info(f"SentenceTransformer model '{MODEL_NAME}' loaded successfully.")
 except Exception as e:
     logger.error(f"Failed to load SentenceTransformer model '{MODEL_NAME}': {e}")
-    model = None
+    raise e
 
 
 def get_embedding(text: str) -> np.ndarray:

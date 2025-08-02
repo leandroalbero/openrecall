@@ -32,6 +32,7 @@ extras_require = {
     "python-doctr": [
         "python-doctr @ git+https://github.com/koenvaneijk/doctr.git@af711bc04eb8876a7189923fb51ec44481ee18cd"
     ],
+    "dev": ["ruff", "mypy", "types-setuptools", "types-psutil", "types-pywin32", "types-psycopg2"],
 }
 
 # Determine the current OS
@@ -43,7 +44,7 @@ elif current_os == "darwin":
 elif current_os == "linux":
     current_os = "linux"
 else:
-    current_os = None
+    current_os = "other"
 
 # Include the OS-specific dependencies if the current OS is recognized
 if current_os and current_os in extras_require:

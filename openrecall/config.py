@@ -55,7 +55,7 @@ else:
 if not os.path.exists(screenshots_path):
     try:
         os.makedirs(screenshots_path)
-    except:
+    except Exception:
         pass
 
 db_url = args.db_url if args.db_url else f"sqlite:///{db_path}"

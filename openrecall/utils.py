@@ -1,39 +1,57 @@
 import sys
 import datetime
 import re
+import subprocess
+from typing import TYPE_CHECKING
 
-# Platform-specific imports with error handling
-try:
+if TYPE_CHECKING:
     import psutil
     import win32gui
     import win32process
     import win32api
-except ImportError:
-    psutil = None
-    win32gui = None
-    win32process = None
-    win32api = None
-
-try:
-    from AppKit import NSWorkspace
-except ImportError:
-    NSWorkspace = None
-
-try:
+    from AppKit import NSWorkspace # type: ignore
     from Quartz import (
         CGWindowListCopyWindowInfo,
         kCGNullWindowID,
         kCGWindowListOptionOnScreenOnly,
     )
-except ImportError:
-    CGWindowListCopyWindowInfo = None
-    kCGNullWindowID = None
-    kCGWindowListOptionOnScreenOnly = None
 
-try:
-    import subprocess
-except ImportError:
-    subprocess = None  # Should always be available in standard lib
+# Flags for optional imports
+HAVE_PSUTIL = False
+HAVE_WIN32 = False
+HAVE_APPKIT = False
+HAVE_QUARTZ = False
+
+# Platform-specific imports
+if sys.platform == "win32":
+    try:
+        import psutil
+        HAVE_PSUTIL = True
+    except ImportError:
+        pass
+    try:
+        import win32gui
+        import win32process
+        import win32api
+        HAVE_WIN32 = True
+    except ImportError:
+        pass
+elif sys.platform == "darwin":
+    try:
+        from AppKit import NSWorkspace
+        HAVE_APPKIT = True
+    except ImportError:
+        pass
+    try:
+        from Quartz import (
+            CGWindowListCopyWindowInfo,
+            kCGNullWindowID,
+            kCGWindowListOptionOnScreenOnly,
+        )
+        HAVE_QUARTZ = True
+    except ImportError:
+        pass
+# For Linux, no additional imports needed beyond standard library
 
 
 def human_readable_time(timestamp: int) -> str:
@@ -71,7 +89,7 @@ def timestamp_to_human_readable(timestamp: int) -> str:
     try:
         dt_object = datetime.datetime.fromtimestamp(timestamp)
         return dt_object.strftime("%Y-%m-%d %H:%M:%S")
-    except:
+    except Exception:
         return ""
 
 
@@ -83,12 +101,12 @@ def get_active_app_name_osx() -> str:
     Returns:
         The name of the active application, or an empty string if unavailable.
     """
-    if NSWorkspace is None:
+    if not HAVE_APPKIT:
         return ""  # Indicate unavailability if import failed
     try:
         active_app = NSWorkspace.sharedWorkspace().activeApplication()
         return active_app.get("NSApplicationName", "")
-    except:
+    except Exception:
         return ""
 
 
@@ -101,7 +119,7 @@ def get_active_window_title_osx() -> str:
     Returns:
         The title of the active window, or an empty string if unavailable.
     """
-    if CGWindowListCopyWindowInfo is None or kCGNullWindowID is None or kCGWindowListOptionOnScreenOnly is None:
+    if not HAVE_QUARTZ:
         return ""  # Indicate unavailability if import failed
     try:
         app_name = get_active_app_name_osx()
@@ -136,7 +154,7 @@ def get_active_app_name_windows() -> str:
     Returns:
         The executable name (e.g., "chrome.exe"), or an empty string if unavailable.
     """
-    if not all([psutil, win32gui, win32process]):
+    if not (HAVE_PSUTIL and HAVE_WIN32):
         return ""  # Indicate unavailability if imports failed
     try:
         hwnd = win32gui.GetForegroundWindow()
@@ -147,7 +165,7 @@ def get_active_app_name_windows() -> str:
             return ""
         exe = psutil.Process(pid).name()
         return exe
-    except:
+    except Exception:
         return ""
 
 
@@ -159,7 +177,7 @@ def get_active_window_title_windows() -> str:
     Returns:
         The title of the foreground window, or an empty string if unavailable.
     """
-    if win32gui is None:
+    if not HAVE_WIN32:
         return ""  # Indicate unavailability if import failed
     try:
         hwnd = win32gui.GetForegroundWindow()
@@ -181,9 +199,6 @@ def get_active_app_name_linux() -> str:
         The instance name of the active window's class, or an empty string if
         unavailable or on error. Requires 'xprop' utility.
     """
-    if subprocess is None:
-        print("Warning: 'subprocess' module not available for Linux app name check.")
-        return ""
     try:
         # Get active window ID
         active_window_cmd = ['xprop', '-root', '_NET_ACTIVE_WINDOW']
@@ -239,9 +254,6 @@ def get_active_window_title_linux() -> str:
         The title of the active window, or an empty string if unavailable or on error.
         Requires 'xprop' utility.
     """
-    if subprocess is None:
-        print("Warning: 'subprocess' module not available for Linux window title check.")
-        return ""
     try:
         # Get active window ID
         active_window_cmd = ['xprop', '-root', '_NET_ACTIVE_WINDOW']
@@ -334,9 +346,6 @@ def is_user_active_osx() -> bool:
         True if the user is considered active, False otherwise. Returns True
         if the check fails for any reason.
     """
-    if subprocess is None:
-        print("Warning: 'subprocess' module not available, assuming user is active.")
-        return True
     try:
         # Run the 'ioreg' command to get idle time information
         # Filtering directly with -k is more efficient
@@ -384,7 +393,7 @@ def is_user_active_windows() -> bool:
         True if the user is considered active, False otherwise. Returns True
         if the check fails.
     """
-    if win32api is None:
+    if not HAVE_WIN32:
         print("Warning: 'win32api' module not available, assuming user is active.")
         return True
     try:
@@ -410,9 +419,6 @@ def is_user_active_linux() -> bool:
         True if the user is considered active (idle < 5s), False otherwise.
         Returns True if the check fails or 'xprintidle' is not available.
     """
-    if subprocess is None:
-        print("Warning: 'subprocess' module not available for Linux idle check.")
-        return True # Assume active if module missing
     try:
         # Run xprintidle to get idle time in milliseconds
         output = subprocess.check_output(['xprintidle'], timeout=1).decode()
